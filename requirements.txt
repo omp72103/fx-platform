@@ -1,0 +1,15 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+sqlalchemy==2.0.35
+psycopg2-binary==2.9.9
+pandas==2.2.2
+numpy==1.26.4
+python-dotenv==1.0.1
+pydantic==2.9.2
+apscheduler==3.10.4
+# MetaTrader5 only installs/works on Windows, or Linux+Wine with a running MT5
+# terminal. It is intentionally NOT pinned as a hard dependency here so the
+# rest of the stack installs and runs on any machine (including this repo's
+# CI and the mock-gateway paper-trading path). Install it only on the box
+# that actually runs the MT5 terminal:
+#   pip install MetaTrader5==5.0.45

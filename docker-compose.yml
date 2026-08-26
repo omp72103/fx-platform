@@ -1,0 +1,70 @@
+version: "3.9"
+
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: fx_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fx
+      POSTGRES_PASSWORD: fx_password
+      POSTGRES_DB: fx_platform
+    volumes:
+      - fx_db_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fx -d fx_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: fx_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  api:
+    build: .
+    container_name: fx_api
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://fx:fx_password@db:5432/fx_platform
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  paper-loop:
+    build: .
+    container_name: fx_paper_loop
+    restart: unless-stopped
+    command: python scripts/run_paper_loop.py
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://fx:fx_password@db:5432/fx_platform
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Prometheus + Grafana are optional MVP-plus observability (section 26).
+  # Uncomment once the core loop is stable on the VPS.
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   volumes:
+  #     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  #   ports:
+  #     - "9090:9090"
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   ports:
+  #     - "3000:3000"
+
+volumes:
+  fx_db_data:

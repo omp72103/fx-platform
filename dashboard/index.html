@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FX Platform — Paper Trading Dashboard</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121821;
+    --panel-2: #171f2b;
+    --border: #232d3b;
+    --text: #e6edf5;
+    --muted: #8b98a9;
+    --accent: #4da3ff;
+    --green: #3ddc97;
+    --red: #ff6b6b;
+    --amber: #ffb84d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 20px 20px 60px; }
+  header { margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; }
+
+  .banner {
+    background: linear-gradient(90deg, #3a2a06, #241a05);
+    border: 1px solid #6b4a0a;
+    color: #ffcf7d;
+    padding: 12px 14px;
+    border-radius: 8px;
+    margin: 14px 0 20px;
+    font-size: 13px;
+  }
+  .banner b { color: #ffe1a3; }
+
+  .config {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 18px;
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+  .field input {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 9px;
+    border-radius: 6px;
+    font-size: 13px;
+    min-width: 220px;
+  }
+  .field.token input { min-width: 320px; font-family: monospace; }
+  button {
+    background: var(--accent);
+    color: #06121f;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.secondary {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  button.cycle {
+    background: var(--green);
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+
+  #status-line { font-size: 12px; color: var(--muted); margin-left: auto; align-self: center; }
+  #status-line.err { color: var(--red); }
+  #status-line.ok { color: var(--green); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 800px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+
+  .tile {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .tile .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 6px; }
+  .tile .value { font-size: 20px; font-weight: 700; }
+  .tile .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 18px;
+  }
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .panel-head h2 { font-size: 14px; margin: 0; }
+  .panel-head .hint { color: var(--muted); font-size: 12px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 10.5px; letter-spacing: .03em; }
+  tbody tr:hover { background: var(--panel-2); }
+  .table-scroll { overflow-x: auto; }
+
+  .pill { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; display: inline-block; }
+  .pill.buy { background: rgba(61,220,151,.15); color: var(--green); }
+  .pill.sell { background: rgba(255,107,107,.15); color: var(--red); }
+  .pill.allow { background: rgba(61,220,151,.15); color: var(--green); }
+  .pill.reject, .pill.block { background: rgba(255,107,107,.15); color: var(--red); }
+  .pill.modify { background: rgba(255,184,77,.15); color: var(--amber); }
+  .pill.filled { background: rgba(61,220,151,.15); color: var(--green); }
+  .pill.rejected { background: rgba(255,107,107,.15); color: var(--red); }
+  .pill.candidate { background: rgba(255,184,77,.15); color: var(--amber); }
+  .pill.approved { background: rgba(61,220,151,.15); color: var(--green); }
+  .pill.shadow { background: rgba(77,163,255,.15); color: var(--accent); }
+  .pill.rejected-model { background: rgba(255,107,107,.15); color: var(--red); }
+
+  .empty { color: var(--muted); font-style: italic; padding: 10px 0; }
+  .cycle-result { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+  .cycle-result b { color: var(--text); }
+  .warn-inline { color: var(--amber); }
+
+  code.small { font-size: 11px; color: var(--muted); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>FX Platform — Paper Trading Dashboard</h1>
+    <div class="subtitle">Live view of the AI Adaptive Forex Trading Platform API (mock gateway, demo account).</div>
+  </header>
+
+  <div class="banner">
+    <b>This is a paper-trading demo, not a live trading system.</b>
+    The market data, order fills and account balance all come from a mock gateway — no real broker, no real money,
+    no real market connection. Nothing shown here should be used to make real trading decisions. See the note at
+    the bottom of the page for what would still be required before this could touch a real account.
+  </div>
+
+  <div class="config">
+    <div class="field">
+      <label for="api-base">API base URL</label>
+      <input id="api-base" type="text" value="https://fx-platform-demo.vercel.app">
+    </div>
+    <div class="field token">
+      <label for="api-token">Auth token</label>
+      <input id="api-token" type="text" value="pZ8nZ0Q0Fu4vgY4rZtFi-4yF0wEai4Zw">
+    </div>
+    <button id="connect-btn" class="secondary">Connect / Refresh all</button>
+    <button id="cycle-btn" class="cycle">▶ Run trading cycle</button>
+    <span id="status-line">not connected yet</span>
+  </div>
+
+  <div class="grid" id="account-tiles">
+    <div class="tile"><div class="label">Balance</div><div class="value" id="t-balance">—</div><div class="sub" id="t-login">—</div></div>
+    <div class="tile"><div class="label">Equity</div><div class="value" id="t-equity">—</div><div class="sub">mock gateway</div></div>
+    <div class="tile"><div class="label">Margin used</div><div class="value" id="t-margin">—</div><div class="sub" id="t-margin-free">free: —</div></div>
+    <div class="tile"><div class="label">Open positions</div><div class="value" id="t-positions">—</div><div class="sub">from /positions</div></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Market ticks</h2>
+      <span class="hint">GET /market/tick/{symbol}</span>
+    </div>
+    <div class="table-scroll">
+      <table id="ticks-table">
+        <thead><tr><th>Symbol</th><th>Bid</th><th>Ask</th><th>Spread</th><th>Timestamp (UTC)</th></tr></thead>
+        <tbody><tr><td colspan="5" class="empty">Not loaded yet</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Run cycle</h2>
+      <span class="hint">POST /run-cycle — Vercel has no background worker, so this manually advances the simulation one full pass (data → features → regime → strategy → risk → execution)</span>
+    </div>
+    <div id="cycle-result" class="cycle-result">Click "Run trading cycle" above to advance the simulation.</div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Recent signals</h2>
+      <span class="hint">GET /signals/recent</span>
+    </div>
+    <div class="table-scroll">
+      <table id="signals-table">
+        <thead><tr><th>Time (UTC)</th><th>Symbol</th><th>TF</th><th>Direction</th><th>Confidence</th><th>Regime</th><th>Strategy</th><th>Entry</th><th>SL</th><th>TP</th></tr></thead>
+        <tbody><tr><td colspan="10" class="empty">Not loaded yet</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Recent risk decisions</h2>
+      <span class="hint">GET /risk-events/recent</span>
+    </div>
+    <div class="table-scroll">
+      <table id="risk-table">
+        <thead><tr><th>Time (UTC)</th><th>Decision</th><th>Reason codes</th><th>Signal ID</th></tr></thead>
+        <tbody><tr><td colspan="4" class="empty">Not loaded yet</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Recent orders</h2>
+      <span class="hint">GET /orders/recent</span>
+    </div>
+    <div class="table-scroll">
+      <table id="orders-table">
+        <thead><tr><th>Time (UTC)</th><th>Symbol</th><th>Dir</th><th>Req. vol</th><th>Req. price</th><th>Status</th><th>Exec price</th><th>Exec vol</th><th>Broker code</th></tr></thead>
+        <tbody><tr><td colspan="9" class="empty">Not loaded yet</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Strategy / model registry</h2>
+      <span class="hint">GET /models — honest status, including strategies that failed out-of-sample validation</span>
+    </div>
+    <div class="table-scroll">
+      <table id="models-table">
+        <thead><tr><th>Strategy</th><th>Version</th><th>Status</th><th>OOS Sharpe</th><th>Validation metrics</th></tr></thead>
+        <tbody><tr><td colspan="5" class="empty">Not loaded yet</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>What this is / is not</h2></div>
+    <div style="color: var(--muted); font-size: 12.5px;">
+      This dashboard talks directly to the live API deployed on Vercel using your browser's own network
+      connection (not a server-side proxy), authenticated with the bearer token above. Everything you see here —
+      account balance, ticks, orders — is generated by a mock/simulated gateway seeded with synthetic data,
+      exactly as configured by <code class="small">gateway_mode: mock</code> and <code class="small">account_mode: demo</code>
+      at the top of the API. Before this could ever be pointed at a real broker account it would still need,
+      at minimum: a real MT5/broker gateway integration running on a VPS with a persistent connection, a managed
+      Postgres database (the current one resets on redeploy), re-validation of every strategy against fresh
+      out-of-sample data (the trend-following strategy currently on record scored an out-of-sample Sharpe of
+      ~0.05, well under the 0.3 promotion floor enforced by <code class="small">/models/{'{'}version{'}'}/promote</code>),
+      and a deliberate human decision to move <code class="small">account_mode</code> off "demo". None of that has
+      been done here, and this tool will keep saying so rather than implying otherwise.
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const baseInput = $('api-base');
+  const tokenInput = $('api-token');
+  const statusLine = $('status-line');
+  const connectBtn = $('connect-btn');
+  const cycleBtn = $('cycle-btn');
+
+  const SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY'];
+
+  function setStatus(msg, kind) {
+    statusLine.textContent = msg;
+    statusLine.className = kind || '';
+  }
+
+  function apiBase() {
+    return baseInput.value.trim().replace(/\/+$/, '');
+  }
+
+  async function api(path, opts) {
+    opts = opts || {};
+    const url = apiBase() + path;
+    const headers = Object.assign({ 'Authorization': 'Bearer ' + tokenInput.value.trim() }, opts.headers || {});
+    let res;
+    try {
+      res = await fetch(url, Object.assign({}, opts, { headers }));
+    } catch (e) {
+      throw new Error(
+        'Network/CORS error calling ' + path + '. If you are viewing this inside a chat preview sandbox, ' +
+        'download this HTML file and open it directly in your browser -- that sandbox may block outbound ' +
+        'requests that this page needs to make to the live API. Raw error: ' + e.message
+      );
+    }
+    let body = null;
+    const text = await res.text();
+    try { body = text ? JSON.parse(text) : null; } catch (e) { body = text; }
+    if (!res.ok) {
+      const detail = (body && (body.error || body.detail)) ? JSON.stringify(body.error || body.detail) : res.status;
+      throw new Error(path + ' -> HTTP ' + res.status + ': ' + detail);
+    }
+    return body;
+  }
+
+  function fmtMoney(n) {
+    if (n === null || n === undefined) return '—';
+    return '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function fmtTs(ts) {
+    if (!ts) return '—';
+    try {
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return String(ts);
+      return d.toISOString().replace('T', ' ').replace('Z', '').slice(0, 19);
+    } catch (e) { return String(ts); }
+  }
+
+  function esc(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function pillClass(v) {
+    if (!v) return '';
+    const k = String(v).toLowerCase();
+    return k;
+  }
+
+  function tbody(tableId) {
+    return document.querySelector('#' + tableId + ' tbody');
+  }
+
+  function renderEmpty(tableId, colspan, msg) {
+    tbody(tableId).innerHTML = '<tr><td colspan="' + colspan + '" class="empty">' + esc(msg) + '</td></tr>';
+  }
+
+  async function loadAccount() {
+    const a = await api('/account');
+    $('t-balance').textContent = fmtMoney(a.balance);
+    $('t-equity').textContent = fmtMoney(a.equity);
+    $('t-margin').textContent = fmtMoney(a.margin);
+    $('t-margin-free').textContent = 'free: ' + fmtMoney(a.margin_free);
+    $('t-login').textContent = (a.login || '—') + (a.is_demo ? ' · demo' : '');
+  }
+
+  async function loadPositions() {
+    const p = await api('/positions');
+    $('t-positions').textContent = Array.isArray(p) ? p.length : '—';
+  }
+
+  async function loadTicks() {
+    const rows = [];
+    for (const sym of SYMBOLS) {
+      try {
+        const t = await api('/market/tick/' + sym);
+        const spread = (t.ask - t.bid);
+        rows.push(
+          '<tr><td>' + esc(sym) + '</td><td>' + Number(t.bid).toFixed(5) + '</td><td>' +
+          Number(t.ask).toFixed(5) + '</td><td>' + spread.toFixed(5) + '</td><td>' + fmtTs(t.timestamp_utc) + '</td></tr>'
+        );
+      } catch (e) {
+        rows.push('<tr><td>' + esc(sym) + '</td><td colspan="4" class="empty">' + esc(e.message) + '</td></tr>');
+      }
+    }
+    tbody('ticks-table').innerHTML = rows.join('');
+  }
+
+  async function loadSignals() {
+    const rows = await api('/signals/recent?limit=20');
+    if (!rows.length) { renderEmpty('signals-table', 10, 'No signals recorded yet -- run a trading cycle above.'); return; }
+    tbody('signals-table').innerHTML = rows.map((r) =>
+      '<tr><td>' + fmtTs(r.timestamp_utc) + '</td><td>' + esc(r.symbol) + '</td><td>' + esc(r.timeframe) + '</td>' +
+      '<td><span class="pill ' + pillClass(r.direction) + '">' + esc(r.direction) + '</span></td>' +
+      '<td>' + (r.confidence !== null && r.confidence !== undefined ? Number(r.confidence).toFixed(2) : '—') + '</td>' +
+      '<td>' + esc(r.regime || '—') + '</td><td>' + esc(r.strategy_id) + ' · ' + esc(r.strategy_version) + '</td>' +
+      '<td>' + (r.entry_reference ?? '—') + '</td><td>' + (r.stop_loss ?? '—') + '</td><td>' + (r.take_profit ?? '—') + '</td></tr>'
+    ).join('');
+  }
+
+  async function loadRiskEvents() {
+    const rows = await api('/risk-events/recent?limit=20');
+    if (!rows.length) { renderEmpty('risk-table', 4, 'No risk decisions recorded yet -- run a trading cycle above.'); return; }
+    tbody('risk-table').innerHTML = rows.map((r) =>
+      '<tr><td>' + fmtTs(r.timestamp_utc) + '</td>' +
+      '<td><span class="pill ' + pillClass(r.decision) + '">' + esc(r.decision) + '</span></td>' +
+      '<td>' + esc(Array.isArray(r.reason_codes) ? r.reason_codes.join(', ') : (r.reason_codes || '—')) + '</td>' +
+      '<td>' + esc(r.signal_id || '—') + '</td></tr>'
+    ).join('');
+  }
+
+  async function loadOrders() {
+    const rows = await api('/orders/recent?limit=20');
+    if (!rows.length) { renderEmpty('orders-table', 9, 'No orders recorded yet -- run a trading cycle above.'); return; }
+    tbody('orders-table').innerHTML = rows.map((r) =>
+      '<tr><td>' + fmtTs(r.request_timestamp_utc) + '</td><td>' + esc(r.symbol) + '</td>' +
+      '<td><span class="pill ' + pillClass(r.direction) + '">' + esc(r.direction) + '</span></td>' +
+      '<td>' + (r.requested_volume ?? '—') + '</td><td>' + (r.requested_price ?? '—') + '</td>' +
+      '<td><span class="pill ' + pillClass(r.status) + '">' + esc(r.status) + '</span></td>' +
+      '<td>' + (r.executed_price ?? '—') + '</td><td>' + (r.executed_volume ?? '—') + '</td>' +
+      '<td>' + esc(r.broker_response_code ?? '—') + '</td></tr>'
+    ).join('');
+  }
+
+  async function loadModels() {
+    const rows = await api('/models');
+    if (!rows.length) { renderEmpty('models-table', 5, 'No strategy versions recorded yet.'); return; }
+    tbody('models-table').innerHTML = rows.map((r) => {
+      const metrics = r.validation_metrics || {};
+      const oos = metrics.out_of_sample_sharpe;
+      const oosStr = (oos === null || oos === undefined) ? '—' :
+        '<span class="' + (oos < 0.3 ? 'warn-inline' : '') + '">' + Number(oos).toFixed(2) + '</span>';
+      return '<tr><td>' + esc(r.strategy_id) + '</td><td>' + esc(r.strategy_version) + '</td>' +
+        '<td><span class="pill ' + pillClass(r.status) + '">' + esc(r.status) + '</span></td>' +
+        '<td>' + oosStr + '</td>' +
+        '<td><code class="small">' + esc(JSON.stringify(metrics)) + '</code></td></tr>';
+    }).join('');
+  }
+
+  async function refreshAll() {
+    connectBtn.disabled = true;
+    cycleBtn.disabled = true;
+    setStatus('loading…');
+    try {
+      await Promise.all([
+        loadAccount(),
+        loadPositions(),
+        loadTicks(),
+        loadSignals(),
+        loadRiskEvents(),
+        loadOrders(),
+        loadModels(),
+      ]);
+      setStatus('connected — last refresh ' + new Date().toISOString().slice(11, 19) + ' UTC', 'ok');
+    } catch (e) {
+      setStatus(e.message, 'err');
+    } finally {
+      connectBtn.disabled = false;
+      cycleBtn.disabled = false;
+    }
+  }
+
+  async function runCycle() {
+    connectBtn.disabled = true;
+    cycleBtn.disabled = true;
+    setStatus('running trading cycle…');
+    const resultEl = $('cycle-result');
+    try {
+      const r = await api('/run-cycle', { method: 'POST' });
+      resultEl.innerHTML = 'Last run: <b>' + esc(r.status) + '</b> — ' +
+        '<b>' + r.new_signals + '</b> new signal(s), <b>' + r.new_orders + '</b> new order(s). (' +
+        new Date().toISOString().slice(11, 19) + ' UTC)';
+      await refreshAll();
+    } catch (e) {
+      setStatus(e.message, 'err');
+      resultEl.textContent = 'Run failed: ' + e.message;
+    } finally {
+      connectBtn.disabled = false;
+      cycleBtn.disabled = false;
+    }
+  }
+
+  connectBtn.addEventListener('click', refreshAll);
+  cycleBtn.addEventListener('click', runCycle);
+
+  // Auto-load on open.
+  refreshAll();
+})();
+</script>
+</body>
+</html>

@@ -2,8 +2,13 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 sqlalchemy==2.0.35
 psycopg2-binary==2.9.9
-pandas==2.2.2
-numpy==1.26.4
+# pandas 2.1+/numpy 1.25+ dropped Python 3.8 wheels, and Python 3.8 is common
+# on the Windows/VPS boxes that run the real MT5 terminal (the MetaTrader5
+# package itself often pulls in an older Python there). Pinned to the last
+# versions with 3.8 wheels so `pip install -r requirements.txt` works on
+# both the MT5/Windows path and any newer Python used elsewhere.
+pandas==2.0.3
+numpy==1.24.4
 python-dotenv==1.0.1
 pydantic==2.9.2
 apscheduler==3.10.4

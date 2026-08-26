@@ -16,6 +16,8 @@ The other two are "candidate, not yet backtested". None are "approved".
 The selector uses this honestly: it does not pretend an unvalidated
 strategy is safe just because it's registered and runnable in paper mode.
 """
+
+from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 

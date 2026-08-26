@@ -15,6 +15,8 @@ backtest (use app/data/historical_loader.py + a real backtester for that) —
 it exists to exercise the live/paper CODE PATH, not to prove a strategy is
 profitable.
 """
+
+from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone

@@ -10,6 +10,8 @@ system (orchestrator, execution engine) never has to know or care which one
 it's talking to. That's what makes "start on demo, flip to a real broker
 later" a one-line config change (GATEWAY_MODE env var) instead of a rewrite.
 """
+
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime

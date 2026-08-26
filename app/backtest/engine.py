@@ -26,6 +26,8 @@ flags for the daily-bar backtest: "not the same as second-by-second broker
 data." Re-run against real MT5 tick/minute data once connected for a finer
 result — see RUNBOOK.md.
 """
+
+from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 import numpy as np

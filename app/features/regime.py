@@ -18,6 +18,8 @@ validated." When this progresses to a supervised model, replace
 `classify_regime_with_confidence` but keep the same return contract so
 nothing downstream has to change.
 """
+
+from __future__ import annotations
 import pandas as pd
 
 REGIME_MODEL_VERSION = "regime_rule_baseline_v1"

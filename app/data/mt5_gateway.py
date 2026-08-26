@@ -24,6 +24,8 @@ ACCOUNT_TRADE_MODE_DEMO) AND app.config.settings.account_mode == "demo".
 Both checks must independently agree. See order_send() below and
 app/execution_engine.py for the second, independent guard.
 """
+
+from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional

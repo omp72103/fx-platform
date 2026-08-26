@@ -2,6 +2,8 @@
 Central configuration, loaded from environment variables (.env).
 Nothing here should ever contain a hard-coded secret (section 25).
 """
+
+from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from dotenv import load_dotenv

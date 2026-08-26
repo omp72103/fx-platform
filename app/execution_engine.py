@@ -20,6 +20,8 @@ Independent of the mock/MT5 gateway split, this module carries its OWN
 demo-only guard (settings.account_mode) so that even a future gateway
 implementation that forgets its own safety check cannot cause a live order.
 """
+
+from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 

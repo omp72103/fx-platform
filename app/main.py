@@ -5,6 +5,7 @@ FastAPI application entrypoint. Run with:
 import uuid
 import time
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
@@ -14,6 +15,19 @@ from app.api.routes import router
 from app.audit import log_event
 
 app = FastAPI(title="AI Adaptive Forex Trading Platform API", version="0.1.0")
+
+# CORS: this is a demo API (mock gateway, no real money) meant to be polled
+# directly from a browser-based dashboard that lives on a different origin.
+# Wide open on purpose for that reason -- do not carry this "*" origin list
+# into a deployment that ever handles real credentials or real funds.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(router)
 
 

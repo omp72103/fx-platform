@@ -28,7 +28,10 @@ from app.strategies.base import StrategySignal
 from app.execution_engine import execute_signal
 from app.config import settings
 from app.audit import log_audit
-from app.db.models import StrategyVersion, BacktestRun, BacktestTradeRow
+from app.db.models import (
+    StrategyVersion, BacktestRun, BacktestTradeRow,
+    StrategySignal as StrategySignalRow, RiskEvent, Order, Execution,
+)
 
 router = APIRouter()
 _gateway = None
@@ -159,6 +162,83 @@ def order_send(body: OrderSendIn, db=Depends(get_db), rid=Depends(request_id),
         "order_id": order_id, "status": result.status,
         "executed_price": result.executed_price, "executed_volume": result.executed_volume,
         "broker_response_code": result.broker_response_code,
+    }
+
+
+# -------------------------------------------------------------- Activity ---
+# Read-only views into what the orchestrator has actually done, so a
+# dashboard has real activity to render instead of only point-in-time state.
+
+@router.get("/signals/recent")
+def recent_signals(limit: int = 20, _auth=Depends(require_auth), db=Depends(get_db)):
+    rows = (db.query(StrategySignalRow)
+              .order_by(StrategySignalRow.timestamp_utc.desc())
+              .limit(min(limit, 100)).all())
+    return [{
+        "signal_id": r.signal_id, "strategy_id": r.strategy_id,
+        "strategy_version": r.strategy_version, "symbol": r.symbol,
+        "timeframe": r.timeframe, "timestamp_utc": r.timestamp_utc,
+        "regime": r.regime, "direction": r.direction, "confidence": r.confidence,
+        "entry_reference": r.entry_reference, "stop_loss": r.stop_loss,
+        "take_profit": r.take_profit, "reason_codes": r.reason_codes,
+    } for r in rows]
+
+
+@router.get("/risk-events/recent")
+def recent_risk_events(limit: int = 20, _auth=Depends(require_auth), db=Depends(get_db)):
+    rows = (db.query(RiskEvent)
+              .order_by(RiskEvent.timestamp_utc.desc())
+              .limit(min(limit, 100)).all())
+    return [{
+        "risk_event_id": r.risk_event_id, "signal_id": r.signal_id,
+        "timestamp_utc": r.timestamp_utc, "decision": r.decision,
+        "reason_codes": r.reason_codes,
+    } for r in rows]
+
+
+@router.get("/orders/recent")
+def recent_orders(limit: int = 20, _auth=Depends(require_auth), db=Depends(get_db)):
+    rows = (db.query(Order)
+              .order_by(Order.request_timestamp_utc.desc())
+              .limit(min(limit, 100)).all())
+    out = []
+    for o in rows:
+        ex = db.query(Execution).filter_by(order_id=o.order_id).first()
+        out.append({
+            "order_id": o.order_id, "symbol": o.symbol, "direction": o.direction,
+            "requested_volume": o.requested_volume, "requested_price": o.requested_price,
+            "status": o.status, "account_mode": o.account_mode,
+            "request_timestamp_utc": o.request_timestamp_utc,
+            "executed_price": ex.executed_price if ex else None,
+            "executed_volume": ex.executed_volume if ex else None,
+            "broker_response_code": ex.broker_response_code if ex else None,
+        })
+    return out
+
+
+@router.post("/run-cycle")
+def run_cycle(db=Depends(get_db), rid=Depends(request_id), _auth=Depends(require_auth)):
+    """Manually trigger one pass of the orchestrator (data -> features ->
+    regime -> strategy -> risk -> execution) for every configured
+    symbol/timeframe. Vercel serverless has no persistent background worker,
+    so this is the on-demand equivalent of scripts/run_paper_loop.py -- click
+    it (or hit it) to advance the paper-trading simulation by one cycle."""
+    from app.orchestrator import run_once
+    from app.strategies.registry import default_registry
+
+    before_signals = db.query(StrategySignalRow).count()
+    before_orders = db.query(Order).count()
+
+    run_once(db, gateway(), default_registry())
+
+    after_signals = db.query(StrategySignalRow).count()
+    after_orders = db.query(Order).count()
+    log_audit(db, actor="api:/run-cycle", action="run_once",
+              entity_type="cycle", entity_id=rid, request_id=rid)
+    return {
+        "status": "completed",
+        "new_signals": after_signals - before_signals,
+        "new_orders": after_orders - before_orders,
     }
 
 

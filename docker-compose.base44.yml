@@ -1,0 +1,69 @@
+# ---------------------------------------------------------------------------
+# fx-platform — Base44 development environment
+# Serves the static dashboard on :3000 (nginx reverse proxy) and the
+# FastAPI API on :8000, backed by TimescaleDB. Source is bind-mounted so
+# edits hot-reload without image rebuilds.
+# ---------------------------------------------------------------------------
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: fx_db_b44
+    restart: on-failure
+    environment:
+      POSTGRES_USER: fx
+      POSTGRES_DB: fx_platform
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - fx_db_data_b44:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fx -d fx_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: python:3.11-slim
+    container_name: fx_api_b44
+    restart: on-failure
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command:
+      - sh
+      - -ec
+      - |
+        apt-get update && apt-get install -y --no-install-recommends build-essential libpq-dev && rm -rf /var/lib/apt/lists/*
+        pip install --no-cache-dir -r requirements.txt
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    env_file:
+      - ./.env.base44-defaults
+    environment:
+      BASE44_PREVIEW_MODE: ${BASE44_PREVIEW_MODE:-}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  web:
+    image: nginx:alpine
+    container_name: fx_web_b44
+    restart: on-failure
+    volumes:
+      - ./dashboard:/usr/share/nginx/html:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  fx_db_data_b44:

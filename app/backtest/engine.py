@@ -69,7 +69,13 @@ class BacktestResult:
     equity_curve: list = field(default_factory=list)  # [(timestamp, equity), ...]
 
 
-def _period_metrics(trade_pnls: list[float], bars_per_trade_estimate: int = 1) -> PeriodMetrics:
+def _period_metrics(trade_pnls: list[float], years: float | None = None) -> PeriodMetrics:
+    """`years` is the calendar length of the period the trades came from. Sharpe
+    is annualised with sqrt(trades per year), because each observation here is
+    ONE TRADE, not one day. (The earlier version used sqrt(252), which assumes
+    a trade every trading day; with multi-day holds that overstates the
+    magnitude of the ratio by roughly sqrt(252 / trades_per_year).) With no
+    `years` the Sharpe is left per-trade (un-annualised)."""
     if not trade_pnls:
         return PeriodMetrics(0, 0.0, 0.0, 0.0, 0.0, 0.0)
     arr = np.array(trade_pnls)
@@ -92,7 +98,10 @@ def _period_metrics(trade_pnls: list[float], bars_per_trade_estimate: int = 1) -
         profit_factor = round(float(wins.sum() / abs(losses.sum())), 3)
     else:
         profit_factor = None
-    sharpe = (arr.mean() / arr.std() * np.sqrt(252)) if arr.std() > 0 else 0.0
+    sharpe = 0.0
+    if arr.std() > 0:
+        trades_per_year = (len(arr) / years) if (years and years > 0) else 1.0
+        sharpe = arr.mean() / arr.std() * np.sqrt(trades_per_year)
     return PeriodMetrics(
         n_trades=len(arr), total_return_pct=round(float(total_return_pct), 2),
         sharpe=round(float(sharpe), 3), max_drawdown_pct=round(float(drawdown.max() * 100), 2),
@@ -103,8 +112,18 @@ def _period_metrics(trade_pnls: list[float], bars_per_trade_estimate: int = 1) -
 def run_backtest(ohlc_df: pd.DataFrame, strategy: Strategy, symbol: str, timeframe: str,
                   split_date: pd.Timestamp = None, spread_pips: float = 1.5,
                   pip_size: float = 0.0001, min_warmup: int = 260,
-                  max_holding_bars: int = 40) -> BacktestResult:
-    """ohlc_df must have columns date/open/high/low/close, sorted ascending."""
+                  max_holding_bars: int = 40,
+                  precompute_features: bool = True) -> BacktestResult:
+    """ohlc_df must have columns date/open/high/low/close, sorted ascending.
+
+    precompute_features=True computes the feature table ONCE and hands each bar
+    a slice ending at that bar. That is exactly equivalent to rebuilding the
+    features on df.iloc[:i+1] every bar, because every feature in
+    app/features/engine.py is causal (EMAs with adjust=False, trailing rolling
+    windows, diff/shift(1) -- nothing looks forward). It turns an O(n^2) run
+    (minutes for ~2,400 daily bars) into seconds. precompute_features=False keeps
+    the original rebuild-every-bar path; tests/test_backtest_engine.py asserts
+    both produce identical trades, so a future non-causal feature fails loudly."""
     df = ohlc_df.reset_index(drop=True)
     if split_date is None:
         split_date = df["date"].iloc[int(len(df) * 0.65)]
@@ -113,9 +132,13 @@ def run_backtest(ohlc_df: pd.DataFrame, strategy: Strategy, symbol: str, timefra
     equity_curve = []
     open_trade = None  # dict with entry info while a position is open
 
+    full_feats = build_features(df) if precompute_features else None
+
     for i in range(min_warmup, len(df) - 1):
-        window = df.iloc[:i + 1]  # <= only data at/before bar i: no look-ahead
-        feats = build_features(window)
+        if precompute_features:
+            feats = full_feats.iloc[:i + 1]  # <= only rows at/before bar i: no look-ahead
+        else:
+            feats = build_features(df.iloc[:i + 1])
         row = feats.iloc[-1]
         regime, confidence = classify_regime_with_confidence(row)
 
@@ -157,11 +180,16 @@ def run_backtest(ohlc_df: pd.DataFrame, strategy: Strategy, symbol: str, timefra
     oos_pnls = [t.pnl_pct for t in trades if t.is_out_of_sample]
     all_pnls = [t.pnl_pct for t in trades]
 
+    def _years(a, b) -> float:
+        return max((b - a).total_seconds() / (365.25 * 86400), 0.0)
+
+    start = df["date"].iloc[min(min_warmup, len(df) - 1)]
+    end = df["date"].iloc[-1]
     return BacktestResult(
         trades=trades,
-        in_sample=_period_metrics(in_sample_pnls),
-        out_of_sample=_period_metrics(oos_pnls),
-        full_sample=_period_metrics(all_pnls),
+        in_sample=_period_metrics(in_sample_pnls, _years(start, split_date)),
+        out_of_sample=_period_metrics(oos_pnls, _years(split_date, end)),
+        full_sample=_period_metrics(all_pnls, _years(start, end)),
     )
 
 

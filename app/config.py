@@ -26,10 +26,25 @@ class Settings:
     mt5_server: str = os.getenv("MT5_SERVER", "")
     mt5_terminal_path: str = os.getenv("MT5_TERMINAL_PATH", "")
 
-    # Hard safety guard. See app/execution_engine.py — orders are refused
-    # unless this is "demo", regardless of any other setting, until a human
-    # deliberately changes it AND the strategy has cleared validation.
+    # "demo" (default) or "live". Live trading is opt-in and guarded: see
+    # app/live_guard.py for everything that must be true before a single real
+    # order can be sent. Any other value blocks all orders.
     account_mode: str = os.getenv("ACCOUNT_MODE", "demo")
+
+    # --- Live-mode guards (only consulted when ACCOUNT_MODE=live) ---------------
+    # Must equal app.live_guard.LIVE_ACK_PHRASE exactly.
+    live_trading_ack: str = os.getenv("LIVE_TRADING_ACK", "")
+    # The ONE real account login this deployment may trade. Must match MT5_LOGIN
+    # and the login the terminal actually reports.
+    live_expected_login: str = os.getenv("LIVE_EXPECTED_LOGIN", "")
+    # Hard per-order volume cap in lots (raise it deliberately, later).
+    live_max_volume_lots: float = float(os.getenv("LIVE_MAX_VOLUME_LOTS", "0.01"))
+    live_max_orders_per_day: int = int(os.getenv("LIVE_MAX_ORDERS_PER_DAY", "3"))
+    # Live limits can only tighten the general ones (the stricter value wins).
+    live_risk_per_trade_pct: float = float(os.getenv("LIVE_RISK_PER_TRADE_PCT", "0.25"))
+    live_max_daily_loss_pct: float = float(os.getenv("LIVE_MAX_DAILY_LOSS_PCT", "1.0"))
+    # Automated strategies must be status "approved" in the registry to trade live.
+    live_require_approved_strategy: bool = os.getenv("LIVE_REQUIRE_APPROVED_STRATEGY", "true").lower() != "false"
 
     risk_per_trade_pct: float = float(os.getenv("RISK_PER_TRADE_PCT", "1.0"))
     max_daily_loss_pct: float = float(os.getenv("MAX_DAILY_LOSS_PCT", "3.0"))

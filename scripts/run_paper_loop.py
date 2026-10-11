@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-Entrypoint for continuous paper/demo trading — blueprint section 27
-deployment pipeline stage "PAPER" / "DEMO". Runs the orchestrator on a fixed
+Entrypoint for the continuous trading loop. Runs the orchestrator on a fixed
 interval, forever, logging every cycle.
 
-    GATEWAY_MODE=mock  -> pure simulation, no external dependency at all
-    GATEWAY_MODE=mt5   -> real MT5 demo account (requires MT5 terminal +
-                          RUNBOOK.md setup on the VPS; still demo-only,
-                          enforced independently by app/config.py and
-                          app/execution_engine.py)
+    ACCOUNT_MODE=demo (default)
+      GATEWAY_MODE=mock  -> pure simulation, no external dependency at all
+      GATEWAY_MODE=mt5   -> MT5 DEMO account (requires MT5 terminal + RUNBOOK.md)
+    ACCOUNT_MODE=live
+      Real money. Starts only if the live guard passes (app/live_guard.py,
+      RUNBOOK.md section 6): GATEWAY_MODE=mt5, LIVE_TRADING_ACK, a pinned
+      LIVE_EXPECTED_LOGIN, a non-default API token. The broker must also
+      report the account as REAL, re-checked on every order.
 
 Usage:
     python scripts/run_paper_loop.py             # loop forever, 60s interval
@@ -28,6 +30,7 @@ from app.data.gateway_factory import get_gateway
 from app.strategies.registry import default_registry
 from app.orchestrator import run_once, seed_reference_data
 from app.audit import log_event
+from app.live_guard import describe_mode, is_live, live_config_problems
 
 
 def main():
@@ -38,10 +41,27 @@ def main():
 
     print(f"[fx-platform] GATEWAY_MODE={settings.gateway_mode} ACCOUNT_MODE={settings.account_mode} "
           f"symbols={settings.symbols} timeframes={settings.timeframes}")
-    if settings.account_mode != "demo":
-        print("[fx-platform] FATAL: ACCOUNT_MODE is not 'demo'. Refusing to start. "
-              "See RUNBOOK.md before ever changing this.", file=sys.stderr)
+    if settings.account_mode not in ("demo", "live"):
+        print(f"[fx-platform] FATAL: ACCOUNT_MODE={settings.account_mode!r} is not 'demo' or 'live'.",
+              file=sys.stderr)
         sys.exit(1)
+    if is_live(settings):
+        problems = live_config_problems(settings)
+        if problems:
+            print("[fx-platform] FATAL: ACCOUNT_MODE=live but the live guard is not satisfied:",
+                  file=sys.stderr)
+            for p in problems:
+                print(f"  - {p}", file=sys.stderr)
+            print("See RUNBOOK.md section 6.", file=sys.stderr)
+            sys.exit(1)
+        lim = describe_mode(settings)["limits"]
+        print("=" * 64)
+        print("  LIVE TRADING: REAL MONEY. Orders will be sent to a real account.")
+        print(f"  account {settings.live_expected_login} | max {lim['max_volume_lots']} lots/order | "
+              f"max {lim['max_orders_per_day']} orders/day")
+        print(f"  risk/trade {lim['risk_per_trade_pct']}% | daily loss stop {lim['max_daily_loss_pct']}%")
+        print("  Emergency stop: `touch KILL_SWITCH` (blocks new orders; keeps positions).")
+        print("=" * 64)
 
     init_db()
     session = SessionLocal()

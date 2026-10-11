@@ -47,7 +47,8 @@ def gateway():
 
 @router.get("/health")
 def health():
-    return {"status": "ok", "gateway_mode": settings.gateway_mode, "account_mode": settings.account_mode}
+    from app.live_guard import describe_mode
+    return {"status": "ok", **describe_mode(settings)}
 
 
 # ---------------------------------------------------------------- Market ---
@@ -95,7 +96,8 @@ def evaluate_risk(body: RiskEvaluateIn, db=Depends(get_db), rid=Depends(request_
         stop_loss=body.stop_loss, take_profit=body.take_profit,
     )
     account_state = build_account_state(
-        db, gw, spread_pips=abs(tick.ask - tick.bid) / symbol_info["pip_size"], symbol=body.symbol)
+        db, gw, spread_pips=abs(tick.ask - tick.bid) / symbol_info["pip_size"], symbol=body.symbol,
+        strategy_version=body.strategy_version)
     decision = risk_evaluate(signal, account_state, symbol_info)
     log_audit(db, actor="api:/risk/evaluate", action=decision.decision,
               entity_type="manual_signal", entity_id=body.symbol, request_id=rid,
@@ -143,8 +145,18 @@ def order_send(body: OrderSendIn, db=Depends(get_db), rid=Depends(request_id),
             "error": "risk_rejected", "reason_codes": decision.reason_codes,
         })
 
+    # Persist the order first so it counts toward the live orders-per-day budget
+    # (previously manual orders left no row at all).
     order_id = str(uuid.uuid4())
+    order_row = Order(order_id=order_id, symbol=body.symbol, direction=body.direction,
+                       requested_volume=decision.approved_volume, requested_price=entry_ref,
+                       sl=body.sl, tp=body.tp, status="pending",
+                       account_mode=settings.account_mode)
+    db.add(order_row)
+    db.commit()
     result = execute_signal(gw, signal, decision, order_id)
+    order_row.status = result.status
+    db.commit()
     return {
         "order_id": order_id, "status": result.status,
         "executed_price": result.executed_price, "executed_volume": result.executed_volume,

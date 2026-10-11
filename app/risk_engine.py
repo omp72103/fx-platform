@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from app.config import settings
+from app.live_guard import effective_limits, is_live
 from app.strategies.base import StrategySignal
 
 
@@ -41,6 +42,10 @@ class AccountState:
     margin_required_estimate: float
     kill_switch_active: bool = False
     news_reason: str = ""               # why news_risk_score is what it is (audit trail)
+    # Live-mode inputs. Defaults are the safe side: live trading with an
+    # unknown strategy status or an unknown order count is refused/limited.
+    strategy_approved: bool = False     # registry status == "approved" (manual_api is exempt)
+    orders_today: int = 0               # live orders sent since 00:00 UTC
 
 
 @dataclass
@@ -67,7 +72,7 @@ def correlation_group_for(symbol: str):
 
 
 def _position_size(account: AccountState, signal: StrategySignal, pip_size: float,
-                    contract_size: float) -> float:
+                    contract_size: float, risk_pct: float | None = None) -> float:
     """Fixed-fractional sizing off the stop distance — 'never risk more than
     X% of the account on any one trade' (Forex_Strategy_Backtest_Explained.pdf
     section 3, blueprint section 14 'Risk per trade')."""
@@ -76,7 +81,8 @@ def _position_size(account: AccountState, signal: StrategySignal, pip_size: floa
     stop_distance = abs(signal.entry_reference - signal.stop_loss)
     if stop_distance <= 0:
         return 0.0
-    risk_amount = account.equity * (settings.risk_per_trade_pct / 100.0)
+    risk_pct = settings.risk_per_trade_pct if risk_pct is None else risk_pct
+    risk_amount = account.equity * (risk_pct / 100.0)
     volume = risk_amount / (stop_distance * contract_size)
     return max(round(volume, 2), 0.0)
 
@@ -84,9 +90,12 @@ def _position_size(account: AccountState, signal: StrategySignal, pip_size: floa
 def evaluate(signal: StrategySignal, account: AccountState,
              symbol_info: dict) -> RiskDecision:
     reasons = []
+    live = is_live(settings)
+    limits = effective_limits(settings)   # live values can only tighten the general ones
     applied = {
-        "risk_per_trade_pct": settings.risk_per_trade_pct,
-        "max_daily_loss_pct": settings.max_daily_loss_pct,
+        "account_mode": settings.account_mode,
+        "risk_per_trade_pct": limits["risk_per_trade_pct"],
+        "max_daily_loss_pct": limits["max_daily_loss_pct"],
         "max_weekly_loss_pct": settings.max_weekly_loss_pct,
         "max_drawdown_pct": settings.max_drawdown_pct,
         "max_open_positions": settings.max_open_positions,
@@ -94,6 +103,10 @@ def evaluate(signal: StrategySignal, account: AccountState,
         "max_portfolio_exposure_pct": settings.max_portfolio_exposure_pct,
         "max_spread_pips": settings.max_spread_pips,
     }
+    if live:
+        applied.update(live_max_volume_lots=limits["max_volume_lots"],
+                       live_max_orders_per_day=limits["max_orders_per_day"],
+                       live_require_approved_strategy=settings.live_require_approved_strategy)
     snapshot = {
         "equity": account.equity, "balance": account.balance,
         "daily_pnl": account.daily_pnl, "weekly_pnl": account.weekly_pnl,
@@ -122,10 +135,18 @@ def evaluate(signal: StrategySignal, account: AccountState,
     # 4. Daily / weekly loss limits.
     daily_loss_pct = max(0.0, -account.daily_pnl / account.equity * 100) if account.equity else 100
     weekly_loss_pct = max(0.0, -account.weekly_pnl / account.equity * 100) if account.equity else 100
-    if daily_loss_pct >= settings.max_daily_loss_pct:
+    if daily_loss_pct >= limits["max_daily_loss_pct"]:
         return reject("max_daily_loss_breached", f"daily_loss_{daily_loss_pct:.2f}pct")
     if weekly_loss_pct >= settings.max_weekly_loss_pct:
         return reject("max_weekly_loss_breached", f"weekly_loss_{weekly_loss_pct:.2f}pct")
+
+    # 4b. Live-only gates: strategy must be approved, daily order budget.
+    if live:
+        if (settings.live_require_approved_strategy and signal.strategy_id != "manual_api"
+                and not account.strategy_approved):
+            return reject("strategy_not_approved_for_live", signal.strategy_version)
+        if account.orders_today >= limits["max_orders_per_day"]:
+            return reject("live_max_orders_per_day_reached", f"orders_today_{account.orders_today}")
 
     # 5. Max open positions.
     if account.open_positions >= settings.max_open_positions:
@@ -141,7 +162,11 @@ def evaluate(signal: StrategySignal, account: AccountState,
 
     # 8. Position sizing.
     volume = _position_size(account, signal, symbol_info.get("pip_size", 0.0001),
-                             symbol_info.get("contract_size", 100_000))
+                             symbol_info.get("contract_size", 100_000),
+                             risk_pct=limits["risk_per_trade_pct"])
+    if live and volume > limits["max_volume_lots"]:
+        volume = round(limits["max_volume_lots"], 2)
+        reasons.append("volume_capped_for_live")
     if volume < symbol_info.get("min_volume", 0.01):
         return reject("computed_size_below_minimum")
 

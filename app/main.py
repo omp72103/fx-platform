@@ -8,7 +8,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+import os
 from app.config import settings
+from app.live_guard import describe_mode, is_live, require_valid_live_config
 from app.db.session import init_db, SessionLocal
 from app.orchestrator import seed_reference_data
 from app.api.routes import router
@@ -16,13 +18,17 @@ from app.audit import log_event
 
 app = FastAPI(title="AI Adaptive Forex Trading Platform API", version="0.1.0")
 
-# CORS: this is a demo API (mock gateway, no real money) meant to be polled
-# directly from a browser-based dashboard that lives on a different origin.
-# Wide open on purpose for that reason -- do not carry this "*" origin list
-# into a deployment that ever handles real credentials or real funds.
+# CORS: in demo mode this API is meant to be polled directly from a
+# browser-based dashboard on another origin, so it is wide open ("*").
+# In live mode it is closed by default: only origins listed in CORS_ORIGINS
+# (comma-separated) are allowed.
+_cors_origins = (
+    [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+    if is_live(settings) else ["*"]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -33,6 +39,8 @@ app.include_router(router)
 
 @app.on_event("startup")
 def on_startup():
+    if is_live(settings):
+        require_valid_live_config(settings)   # refuse to serve a half-configured live API
     init_db()
     session = SessionLocal()
     try:
@@ -62,5 +70,4 @@ async def request_id_and_logging(request: Request, call_next):
 
 @app.get("/")
 def root():
-    return {"service": "fx-platform", "gateway_mode": settings.gateway_mode,
-            "account_mode": settings.account_mode}
+    return {"service": "fx-platform", **describe_mode(settings)}

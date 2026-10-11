@@ -29,7 +29,7 @@ def test_execute_signal_fills_on_allow():
     assert result.broker_response_code == "MOCK_OK"
 
 
-def test_execute_signal_blocked_when_account_mode_not_demo(monkeypatch):
+def test_execute_signal_blocked_when_live_config_incomplete(monkeypatch):
     # Settings is a frozen dataclass on purpose; swap the module-level
     # `settings` reference rather than mutating a frozen field.
     from app import execution_engine
@@ -39,7 +39,9 @@ def test_execute_signal_blocked_when_account_mode_not_demo(monkeypatch):
     allow = RiskDecision(decision="ALLOW", reason_codes=["within_all_limits"], approved_volume=0.05)
     result = execute_signal(gw, _signal(), allow, order_id="test-3")
     assert result.status == "blocked"
-    assert result.broker_response_code == "ACCOUNT_MODE_NOT_DEMO"
+    # live requested, but no acknowledgement / expected login / real account:
+    # the guard must refuse, and the mock gateway can never go live.
+    assert result.broker_response_code == "LIVE_GUARD_FAILED"
 
 
 def test_mock_gateway_position_reflects_fill():

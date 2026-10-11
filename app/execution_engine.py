@@ -17,25 +17,48 @@ here. That mirrors blueprint section 34: "Never send an order without an
 auditable risk decision."
 
 Independent of the mock/MT5 gateway split, this module carries its OWN
-demo-only guard (settings.account_mode) so that even a future gateway
-implementation that forgets its own safety check cannot cause a live order.
+account-mode guard so that even a gateway implementation that forgets its own
+safety check cannot place an order on the wrong kind of account:
+  - ACCOUNT_MODE=demo  -> the gateway's account must be a demo account;
+  - ACCOUNT_MODE=live  -> the full live guard (app/live_guard.py) must pass,
+    the account must be real with the expected login, and the order volume
+    must not exceed LIVE_MAX_VOLUME_LOTS;
+  - anything else      -> blocked.
+It also re-checks the kill switch immediately before sending.
 """
 
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+import logging
+
 from app.config import settings
+from app.kill_switch import is_kill_switch_active
+from app.live_guard import account_problems, is_live
 from app.data.gateway_base import Gateway, OrderRequest
 from app.risk_engine import RiskDecision
 from app.strategies.base import StrategySignal
 
 
+log = logging.getLogger(__name__)
+
+
 class LiveTradingBlockedError(RuntimeError):
-    """Raised if anything ever tries to execute outside of ACCOUNT_MODE=demo
-    without going through the deliberate promotion process in blueprint
-    section 20 (Model Governance) / section 27 (Deployment Pipeline)."""
+    """Raised by callers that prefer an exception to a 'blocked' result when
+    the live guard refuses an order."""
     pass
+
+
+def _blocked(order_id, signal, volume, code, request_ts) -> "ExecutionResult":
+    return ExecutionResult(
+        order_id=order_id, status="blocked",
+        requested_price=signal.entry_reference, executed_price=None,
+        requested_volume=volume, executed_volume=None,
+        latency_ms=None, slippage=None, spread=None,
+        broker_response_code=code,
+        request_timestamp_utc=request_ts, execute_timestamp_utc=None,
+    )
 
 
 @dataclass
@@ -65,16 +88,26 @@ def execute_signal(gateway: Gateway, signal: StrategySignal, risk_decision: Risk
             f"responsible for stopping at the Risk Engine's REJECT."
         )
 
-    # Hard guard, independent of whichever gateway is configured.
-    if settings.account_mode != "demo":
-        return ExecutionResult(
-            order_id=order_id, status="blocked",
-            requested_price=signal.entry_reference, executed_price=None,
-            requested_volume=risk_decision.approved_volume, executed_volume=None,
-            latency_ms=None, slippage=None, spread=None,
-            broker_response_code="ACCOUNT_MODE_NOT_DEMO",
-            request_timestamp_utc=request_ts, execute_timestamp_utc=None,
-        )
+    # Hard guards, independent of whichever gateway is configured.
+    volume = risk_decision.approved_volume
+    if settings.account_mode not in ("demo", "live"):
+        return _blocked(order_id, signal, volume, "ACCOUNT_MODE_INVALID", request_ts)
+
+    acct = gateway.get_account()
+    problems = account_problems(settings, login=str(acct.login),
+                                is_demo=bool(acct.is_demo), is_real=not acct.is_demo)
+    if problems:
+        log.error("order %s blocked by account guard: %s", order_id, "; ".join(problems))
+        code = "LIVE_GUARD_FAILED" if is_live(settings) else "DEMO_GUARD_FAILED"
+        return _blocked(order_id, signal, volume, code, request_ts)
+
+    if is_live(settings) and volume > settings.live_max_volume_lots + 1e-9:
+        log.error("order %s blocked: volume %s exceeds LIVE_MAX_VOLUME_LOTS %s",
+                  order_id, volume, settings.live_max_volume_lots)
+        return _blocked(order_id, signal, volume, "LIVE_VOLUME_CAP", request_ts)
+
+    if is_kill_switch_active():
+        return _blocked(order_id, signal, volume, "KILL_SWITCH_ACTIVE", request_ts)
 
     tick = gateway.get_tick(signal.symbol)
     spread = abs(tick.ask - tick.bid)

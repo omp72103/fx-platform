@@ -101,7 +101,7 @@ cp .env.example .env
 Edit `.env`:
 ```
 GATEWAY_MODE=mt5
-ACCOUNT_MODE=demo          # do not change — see section 6
+ACCOUNT_MODE=demo          # 'live' only per section 6
 MT5_LOGIN=12345678
 MT5_PASSWORD=your-demo-password
 MT5_SERVER=YourBroker-Demo
@@ -161,31 +161,70 @@ it's active is logged as `REJECT` with reason `kill_switch_active`. It blocks
 new orders only; it does not close open positions — do that deliberately in
 the MT5 terminal.
 
-## 6. What has to be true before ACCOUNT_MODE ever becomes anything other than "demo"
+## 6. Live trading (real money)
 
-This is deliberate friction, not an oversight. Two independent code paths
-(`app/config.py`'s guard and `app/data/mt5_gateway.py`'s own re-check on
-every single order) both refuse to place an order unless the connected
-account reports itself as a demo account AND `ACCOUNT_MODE=demo`. Before a
-human ever changes that:
+Live trading is supported, but it is opt-in, capped, and hard to trigger by
+accident. **Nothing in this repo has been run against a real broker account**:
+the live path is covered by tests with a faked MT5 module, not by a real
+terminal. Treat your first live session as the real test, at minimum size.
 
-1. Every strategy you intend to run must have cleared the same honest
-   in-sample/out-of-sample backtest process as
-   `Forex_Strategy_Backtest_Explained.pdf` — with an out-of-sample Sharpe and
-   profit factor that hold up, not just an in-sample number. Use
-   `POST /backtests` or `app/backtest/engine.py` directly, and check
-   `GET /models` — nothing should be `approved` on a weak out-of-sample
-   result (the `/models/{version}/promote` endpoint already refuses this
-   automatically for Sharpe < 0.3).
-2. It must have run in **paper/demo mode continuously** for a meaningful
-   stretch (blueprint section 28: "compare expected vs observed
-   market/execution conditions") — not just once.
-3. Someone on your team should deliberately review and raise the risk
-   limits in `.env` from their conservative defaults, understanding exactly
-   what each one does (`app/risk_engine.py` has them all documented inline).
-4. Only then, deliberately, does a human change `ACCOUNT_MODE` — and even
-   then, blueprint section 27's own pipeline says to start "SMALL LIVE"
-   before "CONTROLLED PRODUCTION", not to jump straight to full size.
+### What the code enforces (four independent layers)
+
+Real orders are possible only when all of these hold; each layer re-checks on
+its own (`app/live_guard.py`, `app/data/mt5_gateway.py`,
+`app/execution_engine.py`, `app/risk_engine.py`):
+
+- `ACCOUNT_MODE=live` and `GATEWAY_MODE=mt5` (the mock gateway can never trade live)
+- `LIVE_TRADING_ACK=I_UNDERSTAND_THIS_TRADES_REAL_MONEY`, typed exactly
+- `LIVE_EXPECTED_LOGIN` set, equal to `MT5_LOGIN`, and equal to the login the
+  terminal reports, re-checked before every order (a terminal that silently
+  switches account stops the engine)
+- the broker reports the account as **REAL** (demo and contest accounts are refused)
+- `API_AUTH_TOKEN` changed from the default (16+ characters); CORS is closed
+  unless you list origins in `CORS_ORIGINS`
+- live-only limits, which can only tighten the general ones:
+  `LIVE_MAX_VOLUME_LOTS` (default 0.01, a hard stop in the execution engine and
+  a cap in the risk engine), `LIVE_MAX_ORDERS_PER_DAY` (default 3),
+  `LIVE_RISK_PER_TRADE_PCT` (0.25), `LIVE_MAX_DAILY_LOSS_PCT` (1.0)
+- automated strategies must have status `approved` in the registry
+  (`LIVE_REQUIRE_APPROVED_STRATEGY=true`). Manual `/orders/send` orders are
+  exempt from this one check but not from any cap.
+- the kill switch (`touch KILL_SWITCH`) is checked in the risk engine and again
+  immediately before each order
+- demo mode is the mirror image: `ACCOUNT_MODE=demo` refuses a real account
+
+### What it cannot do for you
+
+- **No strategy here has a demonstrated edge.** See `docs/BACKTEST_FINDINGS.md`:
+  on H1 every strategy loses after costs, and nothing is `approved`, so with the
+  default settings the live loop will place **no** automated orders. That is the
+  gate working. Promoting a strategy (`POST /models/{version}/promote`) is your
+  decision, and the evidence so far does not support it.
+- Daily/weekly loss limits use equity snapshots. **Do not deposit or withdraw
+  while the engine runs**: a deposit hides a loss and a withdrawal looks like one.
+- Margin is pre-checked with a fixed 30:1 estimate; the broker's `order_check`
+  is the real margin test. Stops are attached to the order, but a gap can fill
+  beyond them.
+- `order_check` success (retcode 0) and fill-mode selection follow MT5 docs but
+  are unverified against your broker. Expect to adjust.
+- Forex is leveraged and most retail accounts lose money. Only risk money you
+  can afford to lose entirely. Check the rules for your jurisdiction (for
+  example, Indian residents trading offshore forex may face FEMA/RBI limits).
+
+### Going live, in order
+
+1. Run on a **demo** account for a meaningful stretch with the exact config you
+   will use live. Review what it did (`/orders`, `/risk-events/recent`).
+2. `python scripts/test_mt5_connection.py` with the live credentials. It is
+   read-only and places no orders.
+3. In `.env` set `ACCOUNT_MODE=live`, `GATEWAY_MODE=mt5`, `MT5_*`,
+   `LIVE_EXPECTED_LOGIN`, `LIVE_TRADING_ACK`, a strong `API_AUTH_TOKEN`.
+   Keep the default caps. Fund the account with an amount you can lose.
+4. Start the loop. The banner prints the account and limits; if the guard is
+   not satisfied it refuses to start and lists exactly what is wrong.
+5. Watch the first sessions. Raise caps only deliberately, one at a time.
+6. To stop: `touch KILL_SWITCH` (blocks new orders; close positions yourself in
+   the terminal), or stop the process.
 
 ## 7. Troubleshooting
 
@@ -193,10 +232,10 @@ human ever changes that:
   outside the Wine/Windows environment that has it. Either run those
   processes inside that environment, or use `GATEWAY_MODE=mock` to confirm
   everything else works first.
-- **`MT5SafetyError` on startup** — the connected account isn't reporting as
-  demo, or `ACCOUNT_MODE` isn't `demo`. Don't work around this — figure out
-  why (wrong login, wrong server, or a genuinely live account) before
-  proceeding.
+- **`MT5SafetyError`** — the connected account doesn't match `ACCOUNT_MODE`
+  (demo needs a demo account; live needs a REAL account with the login in
+  `LIVE_EXPECTED_LOGIN` and the full live config). The message lists what is
+  wrong. Don't work around it: check login, server, and `.env`.
 - **No signals ever appear** — normal for a market spending most of its time
   ranging (see `GET /models` for each strategy's `preferred_regimes`); check
   `market_regimes` in the DB to see what regime is actually being detected.

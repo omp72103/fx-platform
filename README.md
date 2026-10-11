@@ -9,11 +9,13 @@ RISK ENGINE -> EXECUTION -> TRADE + AUDIT -> LEARNING/MLOps
 ```
 
 It runs end-to-end today against a deterministic mock broker (zero setup,
-zero risk) and is wired to switch to a real MT5 **demo** account with one
-config change — see `RUNBOOK.md` for that path. It does **not** place real
-orders with real money, and two independent code paths refuse to let it,
-until a human deliberately changes `ACCOUNT_MODE` after the validation
-gates in blueprint section 33 are actually met (see `RUNBOOK.md` section 6).
+zero risk) and can switch to a real MT5 **demo** account (`RUNBOOK.md`).
+**Live trading with real money is supported but opt-in** (`ACCOUNT_MODE=live`):
+it needs an explicit acknowledgement, a pinned account login, a real-account
+check on every order, hard lot and order-count caps, tighter risk limits, and an
+`approved` strategy; see `RUNBOOK.md` section 6. Default is demo. No strategy
+here has a demonstrated edge (`docs/BACKTEST_FINDINGS.md`), so live trading can
+lose money. This is not financial advice.
 
 ## Quickstart (2 minutes, no broker needed)
 
@@ -127,6 +129,6 @@ db/init.sql        full blueprint-spec Postgres schema
 scripts/
   run_paper_loop.py
 tests/
-RUNBOOK.md          MT5 demo account + VPS deployment, step by step
+RUNBOOK.md          MT5 demo/live setup, VPS deployment, live-mode guard
 docker-compose.yml
 ```

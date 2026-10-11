@@ -18,11 +18,13 @@ connect(), and this module will raise a clear error if it's missing or if
 mt5.initialize() fails — it will NOT silently fall back to mock, because
 silently trading against the wrong thing is worse than crashing loudly.
 
-SAFETY: this class refuses to place a single order unless the connected
-account reports itself as a demo account (mt5 account_info().trade_mode ==
-ACCOUNT_TRADE_MODE_DEMO) AND app.config.settings.account_mode == "demo".
-Both checks must independently agree. See order_send() below and
-app/execution_engine.py for the second, independent guard.
+SAFETY: the connected account's type must match ACCOUNT_MODE, checked at
+connect and again before every order_send():
+  - ACCOUNT_MODE=demo requires a DEMO account (a real account is refused);
+  - ACCOUNT_MODE=live requires a REAL account whose login equals
+    LIVE_EXPECTED_LOGIN, plus the full live configuration guard
+    (app/live_guard.py: acknowledgement phrase, non-default API token, caps).
+app/execution_engine.py carries a second, independent guard.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from app.data.gateway_base import (
     Gateway, Tick, Bar, AccountInfo, OrderRequest, OrderResult,
 )
 from app.config import settings
+from app.live_guard import account_problems
 
 _TIMEFRAME_MAP_NAMES = {
     "M1": "TIMEFRAME_M1", "M5": "TIMEFRAME_M5", "M15": "TIMEFRAME_M15",
@@ -47,7 +50,7 @@ class MT5ConnectionError(RuntimeError):
 
 
 class MT5SafetyError(RuntimeError):
-    """Raised whenever the demo-only safety guard would be violated."""
+    """Raised whenever the account-type / live-mode safety guard would be violated."""
     pass
 
 
@@ -90,24 +93,24 @@ class MT5Gateway(Gateway):
         if acct is None:
             raise MT5ConnectionError("mt5.account_info() returned None after connect")
 
-        # --- Hard safety guard #1: refuse anything that isn't a demo account.
-        is_demo = getattr(acct, "trade_mode", None) == mt5.ACCOUNT_TRADE_MODE_DEMO
-        if settings.account_mode != "demo":
-            raise MT5SafetyError(
-                "ACCOUNT_MODE is not 'demo'. This build refuses to connect "
-                "under any other setting until the strategy has cleared the "
-                "full validation gate in blueprint section 33 AND a human "
-                "has deliberately reviewed and changed this setting."
-            )
-        if not is_demo:
-            raise MT5SafetyError(
-                f"Connected MT5 account (login={acct.login}) is NOT reported "
-                f"as a demo account by the broker (trade_mode={acct.trade_mode}). "
-                "Refusing to proceed — this platform will not trade a real "
-                "account automatically."
-            )
+        # --- Hard safety guard #1: the account type must match ACCOUNT_MODE.
+        self._verify_account(acct)
 
         self._connected = True
+
+    def _verify_account(self, acct) -> None:
+        """Raise MT5SafetyError unless the account the terminal reports may be
+        traded under the configured ACCOUNT_MODE. Called at connect and again
+        before every order."""
+        mt5 = self._mt5
+        trade_mode = getattr(acct, "trade_mode", None)
+        problems = account_problems(
+            settings, login=str(getattr(acct, "login", "")),
+            is_demo=trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO,
+            is_real=trade_mode == mt5.ACCOUNT_TRADE_MODE_REAL,
+        )
+        if problems:
+            raise MT5SafetyError("Refusing to proceed: " + "; ".join(problems))
 
     def _pip_size(self, symbol: str) -> float:
         info = self._mt5.symbol_info(symbol)
@@ -185,7 +188,11 @@ class MT5Gateway(Gateway):
         mt5 = self._mt5
         request = self._build_request(req, mt5)
         result = mt5.order_check(request)
-        return {"ok": result.retcode == mt5.TRADE_RETCODE_DONE if result else False,
+        # order_check reports success as retcode 0 (order_send uses DONE/10009);
+        # accept both so a passing check is never mistaken for a failure.
+        ok = bool(result) and result.retcode in (0, mt5.TRADE_RETCODE_DONE)
+        return {"ok": ok,
+                "reason": None if ok else (getattr(result, "comment", None) or mt5.last_error()),
                 "raw": result._asdict() if result else None}
 
     def _build_request(self, req: OrderRequest, mt5) -> dict:
@@ -203,8 +210,19 @@ class MT5Gateway(Gateway):
             "deviation": 20,
             "comment": req.comment or "fx-platform",
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": self._filling_mode(req.symbol, mt5),
         }
+
+    def _filling_mode(self, symbol: str, mt5):
+        """Brokers accept different fill policies; an unsupported one is rejected
+        (retcode 10030). Pick one the symbol advertises: IOC, then FOK, else RETURN."""
+        info = mt5.symbol_info(symbol)
+        flags = getattr(info, "filling_mode", 0) or 0
+        if flags & 2:
+            return mt5.ORDER_FILLING_IOC
+        if flags & 1:
+            return mt5.ORDER_FILLING_FOK
+        return mt5.ORDER_FILLING_RETURN
 
     def order_send(self, req: OrderRequest) -> OrderResult:
         self._ensure_connected()
@@ -213,11 +231,9 @@ class MT5Gateway(Gateway):
         # --- Hard safety guard #2 (independent of the connect-time check):
         # re-verify on every single order, not just once at startup.
         acct = mt5.account_info()
-        if settings.account_mode != "demo" or acct.trade_mode != mt5.ACCOUNT_TRADE_MODE_DEMO:
-            raise MT5SafetyError(
-                "Refusing order_send: ACCOUNT_MODE or the connected account's "
-                "trade_mode is not demo. This is a deliberate hard stop."
-            )
+        if acct is None:
+            raise MT5SafetyError("Refusing order_send: account_info() returned None")
+        self._verify_account(acct)
 
         request = self._build_request(req, mt5)
         t0 = datetime.now(timezone.utc)

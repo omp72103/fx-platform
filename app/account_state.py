@@ -9,15 +9,16 @@ exposure_by_symbol={}). That meant several limits could never fire. Keeping
 one builder means every caller gets the same, real numbers.
 
 Known limitation: PnL is measured as equity change between portfolio
-snapshots. Deposits/withdrawals during the period look like gains/losses.
-Fine for demo/paper trading; replace with deal-history-based PnL before any
-live use.
+snapshots. Deposits/withdrawals during the period look like gains/losses (a
+deposit hides a loss; a withdrawal looks like one). Do not move money in or
+out of a live account while the engine runs; deal-history-based PnL would
+remove this limitation.
 """
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from app.db.models import PortfolioSnapshot
+from app.db.models import Order, PortfolioSnapshot, StrategyVersion
 from app.kill_switch import is_kill_switch_active
 from app.news.service import get_news_service
 from app.risk_engine import AccountState, correlation_group_for
@@ -81,9 +82,28 @@ def period_pnl(snapshots, equity: float, now: datetime) -> tuple[float, float]:
             equity - _period_start_equity(snapshots, week_start, equity))
 
 
+def live_orders_today(session, now: datetime) -> int:
+    """Live orders attempted since 00:00 UTC that were not refused before
+    reaching the broker. Counts pending/filled/rejected/error so a retry loop
+    against a failing broker cannot burn through the budget unnoticed."""
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    rows = (session.query(Order)
+            .filter(Order.account_mode == "live", Order.request_timestamp_utc >= day_start)
+            .all())
+    return sum(1 for o in rows if o.status != "blocked")
+
+
+def strategy_is_approved(session, strategy_version: str | None) -> bool:
+    if not strategy_version:
+        return False
+    row = session.query(StrategyVersion).filter_by(strategy_version=strategy_version).first()
+    return bool(row and row.status == "approved")
+
+
 def build_account_state(session, gateway, spread_pips: float, symbol: str | None = None,
                          news_risk_score: float | None = None,
-                         now: datetime | None = None) -> AccountState:
+                         now: datetime | None = None,
+                         strategy_version: str | None = None) -> AccountState:
     """`symbol` selects which currencies' scheduled news to check. Without a
     symbol (e.g. the end-of-cycle portfolio snapshot) no news check is made."""
     now = now or datetime.now(timezone.utc)
@@ -109,4 +129,6 @@ def build_account_state(session, gateway, spread_pips: float, symbol: str | None
         spread_pips=spread_pips, news_risk_score=news_risk_score,
         margin_free=account.margin_free, margin_required_estimate=0.0,
         kill_switch_active=is_kill_switch_active(), news_reason=news_reason,
+        strategy_approved=strategy_is_approved(session, strategy_version),
+        orders_today=live_orders_today(session, now),
     )

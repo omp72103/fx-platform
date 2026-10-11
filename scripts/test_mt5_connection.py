@@ -1,5 +1,5 @@
 """
-Standalone MT5 demo-account connectivity check.
+Standalone MT5 connectivity check (demo or live account, per ACCOUNT_MODE).
 
 WHERE TO RUN THIS: on the machine that actually has the MT5 terminal
 installed and logged in -- a Windows PC/VPS, or a Linux VPS with Wine (see
@@ -38,7 +38,7 @@ def main():
     from app.config import settings
 
     print("=" * 64)
-    print("MT5 demo-account connectivity check")
+    print("MT5 connectivity check (read-only: places NO orders)")
     print("=" * 64)
     print(f"GATEWAY_MODE   = {settings.gateway_mode!r}")
     print(f"ACCOUNT_MODE   = {settings.account_mode!r}")
@@ -80,9 +80,9 @@ def main():
     except MT5SafetyError as e:
         print("\nCONNECTED, but refused by this project's own safety guard:")
         print(f"Reason: {e}")
-        print("\nThis means the account MT5 connected you to is NOT reporting itself")
-        print("as a demo account, or ACCOUNT_MODE isn't 'demo'. This is intentional --")
-        print("this platform will not silently proceed against a live account.")
+        print("\nThe account MT5 connected you to does not match ACCOUNT_MODE (demo needs a")
+        print("demo account; live needs a REAL account whose login equals LIVE_EXPECTED_LOGIN")
+        print("plus the live configuration in RUNBOOK.md section 6). This is intentional.")
         sys.exit(1)
 
     print("\nCONNECTED successfully.")
@@ -92,11 +92,12 @@ def main():
     print(f"  equity       : {account.equity} {account.currency}")
     print(f"  margin_free  : {account.margin_free} {account.currency}")
 
-    if not account.is_demo:
-        print("\nWARNING: account.is_demo is False. The app's own guard should have")
-        print("already refused above -- if you're seeing this, something is wrong;")
-        print("do not proceed to order_send in this state.")
+    if account.is_demo != (settings.account_mode == "demo"):
+        print("\nWARNING: account type does not match ACCOUNT_MODE. The app's own guard")
+        print("should have refused above -- something is wrong; do not trade in this state.")
         sys.exit(1)
+    if settings.account_mode == "live":
+        print("\n*** This is a REAL-money account in live mode. This script placed no orders. ***")
 
     try:
         print(f"\nFetching a live tick for {args.symbol} to confirm market data flows too...")
@@ -108,7 +109,7 @@ def main():
         print(f"  in Market Watch inside the MT5 terminal.)")
         sys.exit(1)
 
-    print("\nAll checks passed. GATEWAY_MODE=mt5 is safe to use for this account.")
+    print("\nAll checks passed. This account matches ACCOUNT_MODE.")
     print("Next: run the API/paper-loop the normal way (RUNBOOK.md section 4) and it")
     print("will use this exact same connection.")
 

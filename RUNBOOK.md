@@ -130,6 +130,25 @@ select symbol, direction, status, requested_volume from orders order by request_
 Every REJECT, MODIFY, ALLOW, and every order/fill is in there with reasons —
 that's the audit trail blueprint section 4 and 26 call for.
 
+### Turning on the news gate
+
+Set in `.env` and restart:
+```
+NEWS_PROVIDER=forexfactory     # or: file  (+ NEWS_CALENDAR_PATH=/path/calendar.json)
+```
+New trades on a symbol are then rejected from 30 min before until 15 min after
+any High-impact event for either of its currencies (e.g. USD CPI blocks EURUSD,
+GBPUSD and USDJPY, not EURGBP). The decision is in `risk_events.reason_codes`,
+e.g. `high_impact_news_window`, `news:USD:HIGH:Core CPI m/m:+10min`.
+
+If the feed can't be fetched, trading is blocked (`news_feed_unavailable`) until
+it recovers, because `NEWS_FAIL_MODE=closed`. Check connectivity from the VPS:
+```bash
+curl -s https://nfs.faireconomy.media/ff_calendar_thisweek.json | head -c 300
+```
+The default feed is unofficial. For anything beyond demo trading, add a
+licensed provider in `app/news/providers.py` (same `fetch()` contract).
+
 ### Emergency stop (kill switch)
 
 To stop all new orders immediately, on the VPS:

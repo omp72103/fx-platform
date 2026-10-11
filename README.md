@@ -37,7 +37,8 @@ full stack (Postgres + API + loop) with `docker compose up -d --build`.
 | 8. Feature Engineering | `app/features/engine.py` |
 | 9. Market Regime Engine | `app/features/regime.py` |
 | 10-11. Strategy Framework, Registry & Selection | `app/strategies/` |
-| 14. Risk Engine | `app/risk_engine.py` |
+| 12. News / economic risk (scheduled-event gate) | `app/news/` |
+| 14. Risk Engine | `app/risk_engine.py`, inputs built in `app/account_state.py`, `app/kill_switch.py` |
 | 16. MT5 Integration | `app/data/mt5_gateway.py`, `RUNBOOK.md` |
 | 17. Execution Engine | `app/execution_engine.py` |
 | 18-19. Backtesting & Validation | `app/backtest/engine.py` |
@@ -83,7 +84,10 @@ it break, fix the real cause, write a test so it stays fixed.
 
 ## What's still ahead of this MVP
 
-- News/economic intelligence (blueprint section 12) — not built.
+- News *sentiment* and headline NLP (blueprint section 12) — not built. What IS built is the
+  scheduled-event gate: `app/news/` blocks new trades around High-impact calendar events
+  (CPI, NFP, rate decisions) per currency, off by default (`NEWS_PROVIDER=none`), fail-closed
+  when enabled and the feed is down. The default feed is unofficial; see `.env.example`.
 - Supervised-model regime classification (section 9's "rule-based baseline
   -> supervised ML" progression) — currently only the rule-based baseline.
 - Prometheus/Grafana wiring (section 26) — `docker-compose.yml` has the

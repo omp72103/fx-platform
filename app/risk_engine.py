@@ -40,6 +40,7 @@ class AccountState:
     margin_free: float
     margin_required_estimate: float
     kill_switch_active: bool = False
+    news_reason: str = ""               # why news_risk_score is what it is (audit trail)
 
 
 @dataclass
@@ -136,7 +137,7 @@ def evaluate(signal: StrategySignal, account: AccountState,
 
     # 7. News restriction.
     if account.news_risk_score >= 0.8:
-        return reject("high_impact_news_window")
+        return reject(*(["high_impact_news_window"] + ([account.news_reason] if account.news_reason else [])))
 
     # 8. Position sizing.
     volume = _position_size(account, signal, symbol_info.get("pip_size", 0.0001),

@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.db.models import PortfolioSnapshot
 from app.kill_switch import is_kill_switch_active
+from app.news.service import get_news_service
 from app.risk_engine import AccountState, correlation_group_for
 
 DEFAULT_CONTRACT_SIZE = 100_000
@@ -80,9 +81,18 @@ def period_pnl(snapshots, equity: float, now: datetime) -> tuple[float, float]:
             equity - _period_start_equity(snapshots, week_start, equity))
 
 
-def build_account_state(session, gateway, spread_pips: float, news_risk_score: float = 0.0,
+def build_account_state(session, gateway, spread_pips: float, symbol: str | None = None,
+                         news_risk_score: float | None = None,
                          now: datetime | None = None) -> AccountState:
+    """`symbol` selects which currencies' scheduled news to check. Without a
+    symbol (e.g. the end-of-cycle portfolio snapshot) no news check is made."""
     now = now or datetime.now(timezone.utc)
+    news_reason = ""
+    if news_risk_score is None:
+        news_risk_score = 0.0
+        if symbol:
+            news = get_news_service().risk_for(symbol, now)
+            news_risk_score, news_reason = news.score, news.reason
     account = gateway.get_account()
     positions = gateway.get_positions()
 
@@ -98,5 +108,5 @@ def build_account_state(session, gateway, spread_pips: float, news_risk_score: f
         correlated_group_exposure=correlated_group_exposure(positions),
         spread_pips=spread_pips, news_risk_score=news_risk_score,
         margin_free=account.margin_free, margin_required_estimate=0.0,
-        kill_switch_active=is_kill_switch_active(),
+        kill_switch_active=is_kill_switch_active(), news_reason=news_reason,
     )

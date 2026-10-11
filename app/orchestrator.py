@@ -156,6 +156,7 @@ def _process_symbol_timeframe(session, gateway, registry, symbol, timeframe, req
     tick = gateway.get_tick(symbol)
     account_state = build_account_state(
         session, gateway, spread_pips=abs(tick.ask - tick.bid) / symbol_info["pip_size"],
+        symbol=symbol,
     )
     risk_decision = risk_evaluate(signal, account_state, symbol_info)
 

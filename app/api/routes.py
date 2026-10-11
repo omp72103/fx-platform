@@ -95,7 +95,7 @@ def evaluate_risk(body: RiskEvaluateIn, db=Depends(get_db), rid=Depends(request_
         stop_loss=body.stop_loss, take_profit=body.take_profit,
     )
     account_state = build_account_state(
-        db, gw, spread_pips=abs(tick.ask - tick.bid) / symbol_info["pip_size"])
+        db, gw, spread_pips=abs(tick.ask - tick.bid) / symbol_info["pip_size"], symbol=body.symbol)
     decision = risk_evaluate(signal, account_state, symbol_info)
     log_audit(db, actor="api:/risk/evaluate", action=decision.decision,
               entity_type="manual_signal", entity_id=body.symbol, request_id=rid,
@@ -133,7 +133,7 @@ def order_send(body: OrderSendIn, db=Depends(get_db), rid=Depends(request_id),
         confidence=1.0, entry_reference=entry_ref, stop_loss=body.sl, take_profit=body.tp,
     )
     account_state = build_account_state(
-        db, gw, spread_pips=abs(tick.ask - tick.bid) / symbol_info["pip_size"])
+        db, gw, spread_pips=abs(tick.ask - tick.bid) / symbol_info["pip_size"], symbol=body.symbol)
     decision = risk_evaluate(signal, account_state, symbol_info)
     log_audit(db, actor="api:/orders/send", action=decision.decision,
               entity_type="manual_order", entity_id=body.symbol, request_id=rid)

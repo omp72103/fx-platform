@@ -41,6 +41,23 @@ class Settings:
     max_spread_pips: float = float(os.getenv("MAX_SPREAD_PIPS", "3.0"))
     max_slippage_pips: float = float(os.getenv("MAX_SLIPPAGE_PIPS", "2.0"))
 
+    # --- News / economic calendar risk (blueprint section 12) ------------------
+    # none          = disabled (news_risk_score is always 0.0)
+    # forexfactory  = public weekly calendar JSON (unofficial, best-effort)
+    # file          = a local JSON file in the same format (NEWS_CALENDAR_PATH)
+    news_provider: str = os.getenv("NEWS_PROVIDER", "none")
+    news_calendar_path: str = os.getenv("NEWS_CALENDAR_PATH", "")
+    news_feed_url: str = os.getenv("NEWS_FEED_URL",
+                                    "https://nfs.faireconomy.media/ff_calendar_thisweek.json")
+    news_block_before_min: float = float(os.getenv("NEWS_BLOCK_BEFORE_MIN", "30"))
+    news_block_after_min: float = float(os.getenv("NEWS_BLOCK_AFTER_MIN", "15"))
+    news_ramp_min: float = float(os.getenv("NEWS_RAMP_MIN", "30"))
+    news_refresh_min: float = float(os.getenv("NEWS_REFRESH_MIN", "30"))
+    news_stale_after_min: float = float(os.getenv("NEWS_STALE_AFTER_MIN", "360"))
+    # What to do when a provider is configured but its data is missing/stale:
+    # "closed" blocks new trades (safe default), "open" trades anyway (logs a warning).
+    news_fail_mode: str = os.getenv("NEWS_FAIL_MODE", "closed")
+
     symbols: list = field(default_factory=lambda: _list_env("SYMBOLS", "EURUSD,GBPUSD,USDJPY"))
     timeframes: list = field(default_factory=lambda: _list_env("TIMEFRAMES", "M5,M15,H1"))
 

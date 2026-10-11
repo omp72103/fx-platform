@@ -12,7 +12,8 @@ The registry entries below carry each strategy's REAL validation status.
 trend_following_ema_v1's validation_metrics are the actual numbers from
 Forex_Strategy_Backtest_Explained.pdf (out-of-sample Sharpe 0.05, profit
 factor 1.03) — i.e. "candidate, does not currently show a durable edge".
-The other two are "candidate, not yet backtested". None are "approved".
+The other two have only been studied on daily bars (see docs/BACKTEST_FINDINGS.md); neither has
+shown a validated edge. None are "approved".
 The selector uses this honestly: it does not pretend an unvalidated
 strategy is safe just because it's registered and runnable in paper mode.
 """
@@ -121,13 +122,18 @@ def default_registry() -> StrategyRegistry:
         supported_symbols=symbols, supported_timeframes=timeframes,
         preferred_regimes=("RANGE",),
         status="candidate",
-        validation_metrics={"note": "Not yet backtested. Paper-trade and validate before trusting."},
+        validation_metrics={"note": "Daily-bar backtest 2012-2022 (docs/BACKTEST_FINDINGS.md): a promising but "
+                                    "unproven lead pooled over EURUSD/GBPUSD/USDJPY, found after looking at 12 "
+                                    "combinations. It does NOT hold on H1 (profit factor ~0.8). Needs a forward "
+                                    "test on post-2022 daily data before any trust."},
     ))
     reg.register(RegistryEntry(
         strategy=BreakoutStrategy(),
         supported_symbols=symbols, supported_timeframes=timeframes,
         preferred_regimes=("HIGH_VOLATILITY",),
         status="candidate",
-        validation_metrics={"note": "Not yet backtested. Paper-trade and validate before trusting."},
+        validation_metrics={"note": "Daily-bar backtest 2012-2022 (docs/BACKTEST_FINDINGS.md): only 3-6 out-of-sample "
+                                    "trades per pair (too few to judge) and poor in-sample (profit factor 0.3-0.5); "
+                                    "no edge on H1 either. No evidence it works."},
     ))
     return reg

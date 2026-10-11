@@ -54,6 +54,14 @@ real historical export (the ejtraderLabs data referenced in the original
 `data_pipeline_ohlc.py`, an MT5 export, or similar) before drawing any real
 conclusions from a backtest.
 
+## Does it make money? (read this first)
+
+Short answer: **no evidence yet.** `docs/BACKTEST_FINDINGS.md` backtests the strategies on real
+EURUSD/GBPUSD/USDJPY history (2012-2022). On H1, the timeframe the paper loop trades, no strategy beats a
+coin flip before costs and all lose after costs. One daily mean-reversion lead looks promising but is
+unproven and needs a forward test. Reproduce with `scripts/run_real_backtest.py`
+(data: ejtraderLabs/historical-data, Apache-2.0).
+
 ## What was verified while building this (not just written — run)
 
 - `pytest tests/` — 25 tests covering the feature/regime engine, all three

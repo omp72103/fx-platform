@@ -214,7 +214,7 @@ its own (`app/live_guard.py`, `app/data/mt5_gateway.py`,
 ### Going live, in order
 
 1. Run on a **demo** account for a meaningful stretch with the exact config you
-   will use live. Review what it did (`/orders`, `/risk-events/recent`).
+   will use live. Review what it did (`/orders/recent`, `/risk-events/recent`).
 2. `python scripts/test_mt5_connection.py` with the live credentials. It is
    read-only and places no orders.
 3. In `.env` set `ACCOUNT_MODE=live`, `GATEWAY_MODE=mt5`, `MT5_*`,

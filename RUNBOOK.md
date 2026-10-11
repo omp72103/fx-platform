@@ -130,6 +130,18 @@ select symbol, direction, status, requested_volume from orders order by request_
 Every REJECT, MODIFY, ALLOW, and every order/fill is in there with reasons —
 that's the audit trail blueprint section 4 and 26 call for.
 
+### Emergency stop (kill switch)
+
+To stop all new orders immediately, on the VPS:
+```bash
+touch KILL_SWITCH      # in the project directory (or the path in KILL_SWITCH_FILE)
+rm KILL_SWITCH         # to resume
+```
+or set `KILL_SWITCH=1` in `.env` and restart. Every Risk Engine decision while
+it's active is logged as `REJECT` with reason `kill_switch_active`. It blocks
+new orders only; it does not close open positions — do that deliberately in
+the MT5 terminal.
+
 ## 6. What has to be true before ACCOUNT_MODE ever becomes anything other than "demo"
 
 This is deliberate friction, not an oversight. Two independent code paths

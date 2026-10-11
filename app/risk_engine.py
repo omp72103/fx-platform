@@ -60,6 +60,11 @@ _CORRELATION_GROUPS = {
 }
 
 
+def correlation_group_for(symbol: str):
+    """Correlation bucket for a symbol, or None if it isn't grouped."""
+    return _CORRELATION_GROUPS.get(symbol)
+
+
 def _position_size(account: AccountState, signal: StrategySignal, pip_size: float,
                     contract_size: float) -> float:
     """Fixed-fractional sizing off the stop distance — 'never risk more than

@@ -23,7 +23,8 @@ from app.api.schemas import (
     ModelPromoteIn,
 )
 from app.data.gateway_factory import get_gateway
-from app.risk_engine import evaluate as risk_evaluate, AccountState
+from app.risk_engine import evaluate as risk_evaluate
+from app.account_state import build_account_state
 from app.strategies.base import StrategySignal
 from app.execution_engine import execute_signal
 from app.config import settings
@@ -86,7 +87,6 @@ def evaluate_risk(body: RiskEvaluateIn, db=Depends(get_db), rid=Depends(request_
     gw = gateway()
     symbol_info = gw.get_symbol_info(body.symbol)
     tick = gw.get_tick(body.symbol)
-    account = gw.get_account()
 
     signal = StrategySignal(
         strategy_id=body.strategy_id, strategy_version=body.strategy_version,
@@ -94,14 +94,8 @@ def evaluate_risk(body: RiskEvaluateIn, db=Depends(get_db), rid=Depends(request_
         confidence=body.confidence, entry_reference=body.entry_reference,
         stop_loss=body.stop_loss, take_profit=body.take_profit,
     )
-    account_state = AccountState(
-        equity=account.equity, balance=account.balance, peak_equity=account.equity,
-        daily_pnl=0, weekly_pnl=0, open_positions=len(gw.get_positions()),
-        exposure_by_symbol={}, correlated_group_exposure={},
-        spread_pips=abs(tick.ask - tick.bid) / symbol_info["pip_size"],
-        news_risk_score=0.0, margin_free=account.margin_free,
-        margin_required_estimate=0.0, kill_switch_active=False,
-    )
+    account_state = build_account_state(
+        db, gw, spread_pips=abs(tick.ask - tick.bid) / symbol_info["pip_size"])
     decision = risk_evaluate(signal, account_state, symbol_info)
     log_audit(db, actor="api:/risk/evaluate", action=decision.decision,
               entity_type="manual_signal", entity_id=body.symbol, request_id=rid,
@@ -131,7 +125,6 @@ def order_send(body: OrderSendIn, db=Depends(get_db), rid=Depends(request_id),
     gw = gateway()
     symbol_info = gw.get_symbol_info(body.symbol)
     tick = gw.get_tick(body.symbol)
-    account = gw.get_account()
 
     entry_ref = tick.ask if body.direction == "BUY" else tick.bid
     signal = StrategySignal(
@@ -139,14 +132,8 @@ def order_send(body: OrderSendIn, db=Depends(get_db), rid=Depends(request_id),
         symbol=body.symbol, timeframe="manual", direction=body.direction,
         confidence=1.0, entry_reference=entry_ref, stop_loss=body.sl, take_profit=body.tp,
     )
-    account_state = AccountState(
-        equity=account.equity, balance=account.balance, peak_equity=account.equity,
-        daily_pnl=0, weekly_pnl=0, open_positions=len(gw.get_positions()),
-        exposure_by_symbol={}, correlated_group_exposure={},
-        spread_pips=abs(tick.ask - tick.bid) / symbol_info["pip_size"],
-        news_risk_score=0.0, margin_free=account.margin_free,
-        margin_required_estimate=0.0, kill_switch_active=False,
-    )
+    account_state = build_account_state(
+        db, gw, spread_pips=abs(tick.ask - tick.bid) / symbol_info["pip_size"])
     decision = risk_evaluate(signal, account_state, symbol_info)
     log_audit(db, actor="api:/orders/send", action=decision.decision,
               entity_type="manual_order", entity_id=body.symbol, request_id=rid)

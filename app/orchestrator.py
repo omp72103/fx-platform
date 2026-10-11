@@ -22,7 +22,8 @@ from app.features.engine import build_features, latest_feature_row, FEATURE_SCHE
 from app.features.regime import add_regime, classify_regime_with_confidence, REGIME_MODEL_VERSION
 from app.strategies.base import MarketState
 from app.strategies.registry import StrategyRegistry, select_signal
-from app.risk_engine import evaluate as risk_evaluate, AccountState
+from app.risk_engine import evaluate as risk_evaluate
+from app.account_state import build_account_state
 from app.execution_engine import execute_signal
 from app.audit import log_event, log_audit, new_request_id
 from app.db.models import (
@@ -89,45 +90,31 @@ def _bars_to_df(bars) -> pd.DataFrame:
 
 def run_once(session, gateway: Gateway, registry: StrategyRegistry):
     request_id = new_request_id()
-    account = gateway.get_account()
-
-    # Track a naive running peak/PnL in-memory-per-call via portfolio_snapshots
-    # history; good enough for paper trading, replace with a proper equity
-    # curve service before any live promotion.
-    snapshots = session.query(PortfolioSnapshot).order_by(PortfolioSnapshot.timestamp_utc.desc()).limit(200).all()
-    peak_equity = max([s.equity for s in snapshots] + [account.equity])
-    today = datetime.now(timezone.utc).date()
-    daily_pnl = sum(s.equity - account.balance for s in snapshots
-                     if s.timestamp_utc and s.timestamp_utc.date() == today) or 0.0
 
     for symbol in settings.symbols:
         for timeframe in settings.timeframes:
             try:
-                _process_symbol_timeframe(session, gateway, registry, symbol, timeframe,
-                                           account, peak_equity, daily_pnl, request_id)
+                _process_symbol_timeframe(session, gateway, registry, symbol, timeframe, request_id)
             except Exception as e:  # noqa: BLE001 - one symbol failing must not kill the loop
+                session.rollback()
                 log_event(session, component="orchestrator", level="ERROR",
                            message=f"{symbol}/{timeframe} failed: {e}", request_id=request_id)
 
+    # End-of-cycle snapshot. Peak/drawdown come from the same builder the Risk
+    # Engine uses, so the dashboard and the limits always agree.
+    state = build_account_state(session, gateway, spread_pips=0.0)
     session.add(PortfolioSnapshot(
-        equity=account.equity, balance=account.balance, margin_used=account.margin,
-        open_positions=len(gateway.get_positions()),
-        net_exposure_by_symbol=_exposure_by_symbol(gateway),
-        drawdown_pct=max(0.0, (peak_equity - account.equity) / peak_equity * 100) if peak_equity else 0.0,
+        equity=state.equity, balance=state.balance,
+        margin_used=gateway.get_account().margin,
+        open_positions=state.open_positions,
+        net_exposure_by_symbol=state.exposure_by_symbol,
+        drawdown_pct=(max(0.0, (state.peak_equity - state.equity) / state.peak_equity * 100)
+                      if state.peak_equity else 0.0),
     ))
     session.commit()
 
 
-def _exposure_by_symbol(gateway: Gateway) -> dict:
-    out = {}
-    for p in gateway.get_positions():
-        notional = p["volume"] * 100_000 * p["avg_open_price"]
-        out[p["symbol"]] = out.get(p["symbol"], 0.0) + notional
-    return out
-
-
-def _process_symbol_timeframe(session, gateway, registry, symbol, timeframe,
-                               account, peak_equity, daily_pnl, request_id):
+def _process_symbol_timeframe(session, gateway, registry, symbol, timeframe, request_id):
     bars = gateway.get_rates(symbol, timeframe, max(300, MIN_BARS_REQUIRED + 60))
     if len(bars) < MIN_BARS_REQUIRED:
         return
@@ -149,7 +136,8 @@ def _process_symbol_timeframe(session, gateway, registry, symbol, timeframe,
     session.commit()
 
     ms = MarketState(symbol=symbol, timeframe=timeframe, features_df=df,
-                      regime=regime, regime_confidence=confidence, account_equity=account.equity)
+                      regime=regime, regime_confidence=confidence,
+                      account_equity=gateway.get_account().equity)
     signal = select_signal(registry, ms)
     if signal is None:
         return
@@ -166,13 +154,8 @@ def _process_symbol_timeframe(session, gateway, registry, symbol, timeframe,
 
     symbol_info = gateway.get_symbol_info(symbol)
     tick = gateway.get_tick(symbol)
-    account_state = AccountState(
-        equity=account.equity, balance=account.balance, peak_equity=peak_equity,
-        daily_pnl=daily_pnl, weekly_pnl=daily_pnl, open_positions=len(gateway.get_positions()),
-        exposure_by_symbol=_exposure_by_symbol(gateway), correlated_group_exposure={},
-        spread_pips=abs(tick.ask - tick.bid) / symbol_info["pip_size"],
-        news_risk_score=0.0, margin_free=account.margin_free,
-        margin_required_estimate=0.0, kill_switch_active=False,
+    account_state = build_account_state(
+        session, gateway, spread_pips=abs(tick.ask - tick.bid) / symbol_info["pip_size"],
     )
     risk_decision = risk_evaluate(signal, account_state, symbol_info)
 
